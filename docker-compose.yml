@@ -1,0 +1,66 @@
+name: anesthesia-connect
+
+services:
+  db:
+    build:
+      context: .
+      dockerfile: db/Dockerfile
+    container_name: anesthesia-db
+    restart: unless-stopped
+    env_file:
+      - .env # POSTGRES_PASSWORD, TZ
+    environment:
+      - POSTGRES_USER=anesthesia
+      - POSTGRES_DB=anesthesia
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anesthesia -d anesthesia"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    ports:
+      # localhost-only: psql access for local dev/seed inspection
+      - "127.0.0.1:5434:5432"
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: anesthesia-api
+    restart: unless-stopped
+    env_file:
+      - .env # POSTGRES_PASSWORD (api reads it directly), JWT_SECRET, TZ
+    environment:
+      - PGHOST=db
+      - PGUSER=anesthesia
+      - PGDATABASE=anesthesia
+      - PGPORT=5432
+      - PORT=4000
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # localhost-only: direct api access for local dev (curl, next dev proxy)
+      - "127.0.0.1:4100:4000"
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        # Baked at build time (Next.js inlines basePath into the client bundle).
+        # Local `npm run dev` uses no basePath (see web/next.config.mjs).
+        BASE_PATH: /anesthesia
+        API_URL: http://api:4000
+    container_name: anesthesia-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      # localhost-only: local dev/demo. Prod exposure lives in the
+      # home-server repo (funnel :10000 → caddy :8089 /anesthesia route).
+      - "127.0.0.1:3100:3000"
+
+volumes:
+  db-data:
